@@ -1,0 +1,120 @@
+
+'use strict';
+
+module.exports =
+  angular
+  .module('plugins.bitbucket.modal', [
+    'plugins.bitbucket.service'
+  ])
+  .controller('BitbucketModal', function($modalInstance, bitbucketService) {
+
+  var vm = this;
+
+  vm.title = 'Organizations';
+  vm.orgs  = bitbucketService.config.orgs;
+  vm.step  = 1;
+
+  vm.fetchRepos     = fetchRepos;
+  vm.fetchBranches  = fetchBranches;
+  vm.fetchTreeFiles = fetchTreeFiles;
+  vm.fetchFile      = fetchFile;
+  vm.close          = closeModal;
+
+  vm.itemsPerPage   = 10;
+  vm.currentPage    = 1;
+  vm.repos          = [];
+  vm.org_name       = null;
+
+  //////////////////////////////
+
+  function setFile() {
+    return $modalInstance.close();
+  }
+
+  function closeModal() {
+    return $modalInstance.dismiss('cancel');
+  }
+
+  function setRepos() {
+    vm.title = 'Repositories';
+    vm.step  = 2;
+    vm.pagination = bitbucketService.config.pagination;
+     
+    if (!vm.totalItems) {
+      //#pagination BUG - @graredcr - 25/09/2016
+      if (String(vm.pagination) == "null")
+      {
+        vm.totalItems = 1 * vm.itemsPerPage;
+      }else{
+        vm.totalItems = vm.pagination.last.page * vm.itemsPerPage;
+      }
+    }
+    vm.repos = bitbucketService.config.repos.sort(function(a, b) {
+      if (a.name < b.name) {
+        return -1;
+      } else if (a.name > b.name) {
+        return 1;
+      } else {
+        return 0;
+      }
+    });
+
+    return vm.repos;
+  }
+
+  function fetchRepos(name) {
+    if (name) {
+      vm.org_name = name
+    }
+
+    bitbucketService.fetchRepos(
+      vm.org_name, vm.currentPage, vm.itemsPerPage
+    ).then(setRepos);
+
+    return false;
+  }
+
+  function fetchFile(url, path) {
+    bitbucketService.config.current.fileName = path.split('/').pop();
+    bitbucketService.config.current.path = path;
+    bitbucketService.fetchFile(url).then(setFile);
+
+    return false;
+  }
+
+  function setBranches() {
+    vm.title = 'Branches';
+    vm.step = 3;
+    vm.branches = bitbucketService.config.branches;
+
+    return vm.branches;
+  }
+
+  function fetchBranches(name) {
+    bitbucketService.config.current.repo = name;
+    bitbucketService.fetchBranches(name).then(setBranches);
+
+    return false;
+  }
+
+  function setTreeFiles() {
+    vm.title = 'Files';
+    vm.step  = 4;
+    vm.files = bitbucketService.config.current.tree;
+
+    return vm.files;
+  }
+
+  function fetchTreeFiles(sha, branch) {
+    bitbucketService.config.current.sha    = sha;
+    bitbucketService.config.current.branch = branch;
+    bitbucketService.fetchTreeFiles(sha).then(setTreeFiles);
+
+    return false;
+  }
+
+  vm.onPageChange = function() {
+    vm.fetchRepos(null, vm.currentPage);
+  }
+
+});
