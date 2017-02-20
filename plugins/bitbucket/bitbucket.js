@@ -3,11 +3,6 @@ var fs = require('fs')
   , request = require('request')
   , url = require('url')
   , parse = require('parse-link-header')
-  , Promise = require('bluebird')
-
-Promise.config({
-  longStackTraces: true
-});
 
 var bitbucketConfigFile = path.resolve(__dirname, '../../configs/bitbucket/', 'bitbucket-config.json')
   , bitbucketConfig = {}
