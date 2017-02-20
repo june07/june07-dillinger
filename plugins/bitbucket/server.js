@@ -38,13 +38,17 @@ var oauth_bitbucket = function(req, res, cb) {
   https://bitbucket.org/site/oauth2/access_token \
   -d grant_type=authorization_code -d code={code}*/
 
-    var params = '?response_type=' + code
+    var params = '?grant_type=authorization_code'
+                  + '&code=' + code
                   + '&client_id=' + client_id
                   + '&client_secret=' + client_secret
 
-    var uri = 'https://bitbucket.com/site/oauth2/access_token'
+    var uri = 'https://'+client_id + ':' + client_secret+'@bitbucket.org/site/oauth2/access_token'
 
-    request.post(uri, function(err, resp, body) {
+    request.post({
+      uri: uri,
+      form: { grant_type: 'authorization_code', code: code }
+    }, function(err, resp, body) {
       // TODO: MAKE THIS MORE GRACEFUL
       if (err) res.send(err.message)
       else {
@@ -53,8 +57,12 @@ var oauth_bitbucket = function(req, res, cb) {
             oauth: null
           }
         }
-        req.session.bitbucket.oauth = (qs.parse(body)).access_token
-        req.session.bitbucket.scope = (qs.parse(body)).scope
+
+        req.session.bitbucket.oauth = (JSON.parse(body)).access_token
+        req.session.bitbucket.scopes = (JSON.parse(body)).scopes
+        req.session.bitbucket.expires_in = (JSON.parse(body)).expires_in
+        req.session.bitbucket.refresh_token = (JSON.parse(body)).refresh_token
+        req.session.bitbucket.token_type = (JSON.parse(body)).token_type
         req.session.isBitbucketSynced = true
         console.log('about')
         Bitbucket.getUsername(req, res,function() {
@@ -65,6 +73,38 @@ var oauth_bitbucket = function(req, res, cb) {
     })
 
   } // end else
+}
+
+var oauth_bitbucket_refresh = function(req, res) {
+
+    var client_id = Bitbucket.bitbucketConfig.client_id
+      , client_secret = Bitbucket.bitbucketConfig.client_secret
+      , refresh_token = Bitbucket.bitbucketConfig.refresh_token
+
+    var uri = Bitbucket.generateRefreshUrl();
+
+    request.post({
+      uri: uri,
+      form: { grant_type: 'refresh_token', refresh_token: refresh_token }
+    }, function(err, resp, body) {
+      // TODO: MAKE THIS MORE GRACEFUL
+      if (err) res.send(err.message)
+      else {
+        if (!req.session.bitbucket) {
+          req.session.bitbucket = {
+            oauth: null
+          }
+        }
+
+        req.session.bitbucket.oauth = (JSON.parse(body)).access_token
+        req.session.bitbucket.scopes = (JSON.parse(body)).scopes
+        req.session.bitbucket.expires_in = (JSON.parse(body)).expires_in
+        req.session.bitbucket.refresh_token = (JSON.parse(body)).refresh_token
+        req.session.bitbucket.token_type = (JSON.parse(body)).token_type
+        console.log('about')
+        Bitbucket.getUsername(req, res, function() {})
+      }
+    })
 }
 
 var unlink_bitbucket = function(req, res) {
@@ -113,6 +153,8 @@ var save_bitbucket = function(req, res) {
 /* End Bitbucket stuff */
 
 /* Begin Bitbucket */
+
+app.get('/refresh/bitbucket', oauth_bitbucket_refresh);
 
 app.get('/redirect/bitbucket', oauth_bitbucket_redirect);
 

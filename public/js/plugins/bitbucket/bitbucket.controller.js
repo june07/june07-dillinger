@@ -18,8 +18,14 @@ module.exports =
 
   //////////////////////////////
 
+  (function() {
+    setInterval(function() {
+      bitbucketService.refreshToken();
+    }, 60000 * 15)
+  })();
   function importFile(username) {
 
+    var closeModal;
     var modalInstance = $modal.open({
       template: require('raw!./bitbucket-modal.directive.html'),
       controller: 'BitbucketModal as modal',
@@ -27,11 +33,14 @@ module.exports =
       resolve: {
         items: function() {
           bitbucketService.config.user.name = username;
-          return bitbucketService.fetchOrgs().then(bitbucketService.registerUserAsOrg);
+          return bitbucketService.fetchOrgs().then(bitbucketService.registerUserAsOrg)
+          .catch(function(error) {
+            closeModal(error);
+          });
         }
       }
     });
-
+    closeModal = modalInstance.close;
     return modalInstance.result.then(function() {
       var file = documentsService.createItem({
         isBitbucketFile: true,

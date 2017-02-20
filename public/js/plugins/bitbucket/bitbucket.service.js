@@ -29,10 +29,21 @@ module.exports =
     }
   },
 
+  getRepoUUID = function(name) {
+    var repo = service.config.repos.find(function(r) {
+      return r.name === name;
+    });
+    service.config.current.repo_uuid = repo.uuid;
+    return repo.uuid;
+  },
+
   service = {
 
     config: {},
 
+    refreshToken: function() {
+      $http.get('/redirect/bitbucket');
+    },
     /**
      *    Add the User to the Organizations Array, as we want to let him
      *    search through his own Repos.
@@ -52,12 +63,10 @@ module.exports =
       service.config.current.url = url;
       return $http.post('import/bitbucket/file', {
         url: url
-      }).success(function(result) {
-        service.config.current.file = result.data.content;
-        service.config.current.url  = result.data.url;
-        service.config.current.sha  = result.data.sha;
+      }).then(function(response) {
+        service.config.current.file = response.data.content;
         return false;
-      }).error(function(err) {
+      }).catch(function(err) {
         return diNotify({
           message: 'An Error occured: ' + err
         });
@@ -77,22 +86,20 @@ module.exports =
       var di;
       di = diNotify('Fetching Files...');
       return $http.post('import/bitbucket/tree_files', {
-        owner:    owner ? owner : service.config.current.owner,
-        repo:     repo ? repo : service.config.current.repo,
-        branch:   branch ? branch : service.config.current.branch,
-        sha:      sha ? sha : service.config.current.sha,
-        fileExts: fileExts ? fileExts : 'md'
-      }).success(function(data) {
+        repo_uuid: service.config.current.repo_uuid,
+        owner: owner || service.config.current.owner,
+        repo: repo || service.config.current.repo,
+        branch: branch || service.config.current.branch,
+        sha: sha || service.config.current.sha,
+        fileExts: fileExts || 'md'
+      }).then(function(response) {
         if (di != null) {
           di.$scope.$close();
         }
-        service.config.current.owner  = owner ? owner : service.config.user.name;
-        service.config.current.repo   = repo ? repo : service.config.current.repo;
-        service.config.current.branch = branch ? branch : service.config.current.branch;
-        service.config.current.sha    = sha ? sha : service.config.current.sha;
-        service.config.current.tree   = data.tree;
-        return service.config.current;
-      }).error(function(err) {
+        service.config.files   = response.data;
+
+        return service.config.files;
+      }).catch(function(err) {
         return diNotify({
           message: 'An Error occured: ' + err
         });
@@ -105,21 +112,26 @@ module.exports =
      *    @param    {String}    repo     Repo Name
      *    @param    {String}    owner    Owner of the Repo
      */
-    fetchBranches: function(repo, owner) {
+    fetchBranches: function(repo, owner, page, per_page) {
       var di;
       di = diNotify('Fetching Branches...');
       return $http.post('import/bitbucket/branches', {
-        owner: owner ? owner : service.config.current.owner,
-        repo:  repo ? repo : service.config.current.repo
-      }).success(function(data) {
+        owner: owner || service.config.current.owner,
+        repo:  repo || service.config.current.repo,
+        repo_uuid: getRepoUUID(repo || service.config.current.repo),
+        page: page,
+        per_page: per_page
+      }).then(function(response) {
         if (di != null) {
           di.$scope.$close();
         }
-        service.config.current.repo  = repo;
-        service.config.branches      = data;
+        //service.config.current.repo  = repo;
+        
+        service.config.pagination = response.data.pagination;
+        service.config.branches = response.data.items;
 
         return service.config.branches;
-      }).error(function(err) {
+      }).catch(function(err) {
         return diNotify({
           message: 'An Error occured: ' + err
         });
@@ -137,17 +149,17 @@ module.exports =
       return $http.post('import/bitbucket/repos', {
         owner: owner,
         page: page,
-        per_page: per_page,
-      }).success(function(data) {
+        per_page: per_page
+      }).then(function(response) {
         if (di != null) {
           di.$scope.$close();
         }
-        service.config.current.owner = owner;
-        service.config.repos = data.items;
-        service.config.pagination = data.pagination;
+        //service.config.current.owner = owner;
+        service.config.pagination = response.data.pagination;
+        service.config.repos = response.data.items;
 
         return service.config.repos;
-      }).error(function(err) {
+      }).catch(function(err) {
         return diNotify({
           message: 'An Error occured: ' + err
         });
@@ -160,14 +172,14 @@ module.exports =
     fetchOrgs: function() {
       var di;
       di = diNotify('Fetching Organizations...');
-      return $http.post('import/bitbucket/orgs').success(function(data) {
+      return $http.post('import/bitbucket/orgs').then(function(response) {
         if (di != null) {
           di.$scope.$close();
         }
-        service.config.orgs = data;
-
+        service.config.orgs = response.data;
+        
         return service.config.orgs;
-      }).error(function(err) {
+      }).catch(function(err) {
         return diNotify({
           message: 'An Error occured: ' + err
         });
@@ -191,31 +203,31 @@ module.exports =
      *    	owner: 'octokit'
      *    }
      */
-    saveToBitbucket: function(data) {
+    saveToBitbucket: function(response) {
       var di;
       di = diNotify('Saving Document on Bitbucket...');
       return $http.post('save/bitbucket', {
-        uri:     data.uri,
-        data:    data.body,
-        path:    data.path,
-        sha:     data.sha,
-        branch:  data.branch,
-        repo:    data.repo,
-        message: data.message,
-        owner:   data.owner
-      }).success(function(result) {
+        uri:     response.uri,
+        data:    response.body,
+        path:    response.path,
+        sha:     response.sha,
+        branch:  response.branch,
+        repo:    response.repo,
+        message: response.message,
+        owner:   response.owner
+      }).then(function(result) {
         if (di.$scope != null) {
           di.$scope.$close();
         }
         diNotify({
-          message: 'Successfully saved to ' + result.content.path + '!',
+          message: 'thenfully saved to ' + result.content.path + '!',
           duration: 5000
         });
         if (window.ga) {
           ga('send', 'event', 'click', 'Save To BitBucket', 'Save To...')
         }
         return result;
-      }).error(function(err) {
+      }).catch(function(err) {
         return diNotify({
           message: 'An Error occured: ' + err.error,
           duration: 5000

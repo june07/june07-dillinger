@@ -3,6 +3,11 @@ var fs = require('fs')
   , request = require('request')
   , url = require('url')
   , parse = require('parse-link-header')
+  , Promise = require('bluebird')
+
+Promise.config({
+  longStackTraces: true
+});
 
 var bitbucketConfigFile = path.resolve(__dirname, '../../configs/bitbucket/', 'bitbucket-config.json')
   , bitbucketConfig = {}
@@ -45,6 +50,7 @@ function arrayToRegExp(arr) {
 exports.Bitbucket = (function() {
 
   var bitbucketApi = 'https://api.bitbucket.org/2.0/'
+    , bitbucketApi_1 = 'https://api.bitbucket.org/1.0/'
     , headers = {
       "User-Agent": "X-Dillinger-App"
     }
@@ -54,13 +60,19 @@ exports.Bitbucket = (function() {
     return  'https://bitbucket.org/site/oauth2/authorize?client_id='
             + bitbucketConfig.client_id
             + '&response_type=code'
+            + '&scope=repository:write'
   }
-
+  function _buildRefreshUrl() {
+    return  'https://'+bitbucketConfig.client_id + ':' + bitbucketConfig.client_secret+'@bitbucket.org/site/oauth2/access_token'
+  }
   return {
     isConfigured: isConfigEnabled,
     bitbucketConfig: bitbucketConfig,
     generateAuthUrl: function(req, res) {
       return _buildAuthUrl()
+    },
+    generateRefreshUrl: function(req, res) {
+      return _buildRefreshUrl()
     },
     getUsername: function(req, res, cb) {
 
@@ -80,14 +92,28 @@ exports.Bitbucket = (function() {
         }
         else if (!e && r.statusCode === 200) {
           d = JSON.parse(d)
-          req.session.bitbucket.username = d.login
+          req.session.bitbucket.username = d.username
           cb && cb()
+        } else if (!e && r.statusCode === 403) {
+          return res.write(r.body)
+          res.end();
+        } else if (!e && r.statusCode === 401) {
+          request.post({
+            uri: _buildRefreshUrl(),
+            form: { grant_type: 'refresh_token', refresh_token: req.session.bitbucket.refresh_token }
+          }, function(e, r, d) {
+            d = JSON.parse(d)
+            req.session.bitbucket.username = d.username
+            cb && cb()
+          })
         }
       }) // end request.get()
 
     }, // end getUsername
     fetchOrgs: function(req, res) {
-      var uri = bitbucketApi + 'teams/'
+      var uri = bitbucketApi
+      + 'teams?access_token=' + req.session.bitbucket.oauth
+      + '&role=contributor'
 
       var options = {
         headers: headers
@@ -106,14 +132,14 @@ exports.Bitbucket = (function() {
 
           d = JSON.parse(d)
 
-          d.forEach(function(el) {
+          d.values.forEach(function(el) {
 
             // Right now BitBucket does not display a "Company Name" in user/orgs API route
             // Hopefully they will add it in later, for now use "login" name.
 
             var item = {
-              url: el.url
-            , name: el.login
+              url: el.links.self.href
+            , name: el.username
             }
 
             set.push(item)
@@ -121,17 +147,24 @@ exports.Bitbucket = (function() {
 
           res.json(set)
 
+        } else if (!e && r.statusCode === 401) {
+          res.json({ error: r.statusCode })
         } // end else if
         else {
-          res.json({ error: 'Unable to fetch organizations from Bitbucket.' })
+          res.json({ error: 'Unable to fetch teams from Bitbucket.' })
         }
       }) // end request callback
 
     }, // end fetchOrgs
 
     fetchRepos: function(req, res) {
+      var uri = bitbucketApi;
 
-      var uri = bitbucketApi + '/repositories/'+ req.session.bitbucket.username +'?access_token=' + req.session.bitbucket.oauth
+      if (req.body.owner !== req.session.bitbucket.username) {
+        uri += 'teams/' + req.body.owner + '/repositories?access_token=' + req.session.bitbucket.oauth
+      } else {
+        uri += 'repositories/'+ req.session.bitbucket.username + '?access_token=' + req.session.bitbucket.oauth
+      }
 
       if (isFinite(req.body.page) && +req.body.page > 1) {
         uri += "&page=" + req.body.page
@@ -141,7 +174,7 @@ exports.Bitbucket = (function() {
         uri += "&per_page=" + req.body.per_page
       }
 
-      uri += "&type=owner"
+      uri += "&type=contributor"
 
       var options = {
         headers: headers
@@ -160,14 +193,15 @@ exports.Bitbucket = (function() {
 
           d = JSON.parse(d)
 
-          d.forEach(function(el) {
+          d.values.forEach(function(el) {
 
             var item = {
-              url: el.url
+              url: el.links.self.href
             , name: el.name
-            , private: el.private
+            , private: el.is_private
             // future property we will need to pass so we can know whether we can "write" to repo
             //, permissions: el.permissions
+            , uuid: el.uuid
             }
 
             set.push(item)
@@ -175,7 +209,11 @@ exports.Bitbucket = (function() {
 
           res.json({
             items: set,
-            pagination: parse(r.headers['link'])
+            pagination: { page: d.page,
+                      last: { page: (d.size % d.pagelen) ? (Math.floor(d.size / d.pagelen) + 1) : Math.floor(d.size / d.pagelen) },
+                      next: d.next,
+                      prev: d.previous
+            }
           });
 
         } // end else if
@@ -192,6 +230,14 @@ exports.Bitbucket = (function() {
         + req.body.repo_uuid
         +'/refs/branches?access_token=' + req.session.bitbucket.oauth
 
+      if (isFinite(req.body.page) && +req.body.page > 1) {
+        uri += "&page=" + req.body.page
+      }
+
+      if (isFinite(req.body.per_page) && +req.body.per_page > 1) {
+        uri += "&per_page=" + req.body.per_page
+      }
+
       var options = {
         headers: headers
       , uri: uri
@@ -205,7 +251,28 @@ exports.Bitbucket = (function() {
           })
         }
         else if (!e && r.statusCode === 200) {
-          res.send(d)
+          var set = []
+
+          d = JSON.parse(d)
+
+          d.values.forEach(function(el) {
+
+            var item = {
+              url: el.links.self.href
+            , name: el.name
+            }
+
+            set.push(item)
+          })
+
+          res.json({
+            items: set,
+            pagination: { page: d.page,
+                      last: { page: (d.size % d.pagelen) ? (Math.floor(d.size / d.pagelen) + 1) : Math.floor(d.size / d.pagelen) },
+                      next: d.next,
+                      prev: d.previous
+            }
+          });
         } // end else if
         else {
           res.json({ error: 'Unable to fetch branches from Bitbucket.' })
@@ -214,23 +281,19 @@ exports.Bitbucket = (function() {
 
     }, // end fetchBranches
 
-
-/** ENDED HERE **/
-
-
     fetchTreeFiles: function(req, res) {
       // /repos/:user/:repo/git/trees/:sha
 
       var uri, options, fileExts, regExp
 
-      uri = bitbucketApi
-        + 'repos/'
+      uri = bitbucketApi_1
+        + 'repositories/'
         + req.body.owner
         + '/'
-        + req.body.repo
-        + '/git/trees/'
-        + req.body.sha + '?recursive=1&access_token=' + req.session.bitbucket.oauth
-        ;
+        + req.body.repo_uuid
+        + '/src/'
+        + req.body.branch
+        + '/?access_token=' + req.session.bitbucket.oauth
 
       options = {
         headers: headers
@@ -252,10 +315,50 @@ exports.Bitbucket = (function() {
           d = JSON.parse(d)
           d.branch = req.body.branch // inject branch info
 
-          // overwrite d.tree to only return items that match regexp
-          d.tree = d.tree.filter(function(item) { return regExp.test(item.path) });
+          var files = d.files;
+          var directories = d.directories;
+          
+          function recurse(directory) {
+            var dir = directory;
+            return new Promise(function(resolve, reject) {
+              var uri2 = uri.split('?')[0] + dir + '/?' + uri.split('?')[1];
+              var options2 = options;
+              options2.uri = uri2;
+              request(options2, function(e, r, d) {
+                if (e) {
+                  reject('Request error.');
+                } else if (!e && r.statusCode === 200) {
+                  d = JSON.parse(d);
+                  files = files.concat(d.files);
+                  d.directories.forEach(function(dir, index, dirs) {
+                    everyFile.push(recurse(path.join(d.path, dir)));
+                    if (dirs.length === index + 1) resolve();
+                  });
+                  if (!d.directories || d.directories.length === 0) return resolve();
+                }
+              });
+            });
+          }
 
-          res.json(d)
+          var everyFile = []; //[ new Promise(function(resolve) { setTimeout(function() { return resolve(); }, 3000) }) ];
+          //var promise;
+          directories.forEach(function(dir, index, dirs) {
+            everyFile.push(recurse(dir));
+            if (dirs.length === index + 1) {
+              //setTimeout(function() {
+                Promise.all(everyFile)
+                .then(function() {
+                  // overwrite d.tree to only return items that match regexp
+                  files = files.filter(function(item) { return regExp.test(item.path) });
+                  if (files.length === 0) return res.json();
+                  files.forEach(function(file, index, files) {
+                    files[index].url = (uri.split('?')[0] + file.path).replace('/src/', '/raw/');
+                    if (files.length === index+1) res.json(files)
+                  })
+                });
+              //}, 500);
+            }
+          });
         } // end else if
         else {
           res.json({ error: 'Unable to fetch files from Bitbucket.' })
@@ -265,14 +368,7 @@ exports.Bitbucket = (function() {
     }, // end fetchTreeFiles
     fetchFile: function(req, res) {
 
-      var uri = req.body.url
-        , isPrivateRepo = /blob/.test(uri)
-
-      // https://api.bitbucket.com/octocat/Hello-World/git/blobs/44b4fc6d56897b048c772eb4087f854f46256132
-      // If it is a private repo, we need to make an API call, because otherwise it is the raw file.
-      if (isPrivateRepo) {
-        uri += '?access_token=' + req.session.bitbucket.oauth
-      }
+      var uri = req.body.url + '?access_token=' + req.session.bitbucket.oauth
 
       var options = {
         headers: headers
@@ -290,18 +386,13 @@ exports.Bitbucket = (function() {
         }
         else if (!e && r.statusCode === 200) {
           var jsonResp = {
-            data: JSON.parse(d),
+            content: d,
             error: false
-          }
-
-          if (isPrivateRepo) {
-            d = JSON.parse(d)
-            jsonResp.data.content = (new Buffer(d.content, 'base64').toString('utf-8'))
           }
 
           res.json(jsonResp)
 
-        } // end else if
+        } // end else if 
         else {
           res.json({ error: 'Unable to fetch file from Bitbucket.' })
         }

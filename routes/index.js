@@ -35,6 +35,10 @@ exports.index = function(req, res) {
     isGoogleAnalyticsConfigured: GoogleAnalytics.isConfigEnabled
   }
 
+  // Capture Bitbucket username for the future...
+  if (req.session.bitbucket && req.session.bitbucket.username) indexConfig.bitbucket_username = req.session.bitbucket.username
+  else indexConfig.isBitbucketAuth = false
+
   // Capture github username for the future...
   if (req.session.github && req.session.github.username) indexConfig.github_username = req.session.github.username
 

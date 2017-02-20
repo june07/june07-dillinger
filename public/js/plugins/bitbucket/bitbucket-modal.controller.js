@@ -24,6 +24,7 @@ module.exports =
   vm.currentPage    = 1;
   vm.repos          = [];
   vm.org_name       = null;
+  vm.branch_name   = null;
 
   //////////////////////////////
 
@@ -86,13 +87,37 @@ module.exports =
     vm.title = 'Branches';
     vm.step = 3;
     vm.branches = bitbucketService.config.branches;
+    vm.pagination = bitbucketService.config.pagination;
+     
+    if (!vm.totalItems) {
+      if (String(vm.pagination) == "null")
+      {
+        vm.totalItems = 1 * vm.itemsPerPage;
+      }else{
+        vm.totalItems = vm.pagination.last.page * vm.itemsPerPage;
+      }
+    }
+    vm.repos = bitbucketService.config.branches.sort(function(a, b) {
+      if (a.name < b.name) {
+        return -1;
+      } else if (a.name > b.name) {
+        return 1;
+      } else {
+        return 0;
+      }
+    });
 
     return vm.branches;
   }
 
   function fetchBranches(name) {
-    bitbucketService.config.current.repo = name;
-    bitbucketService.fetchBranches(name).then(setBranches);
+    if (name) {
+      vm.branch_name = name
+    }
+    bitbucketService.config.current.branch = name;
+    bitbucketService.fetchBranches(
+      vm.branch_name, vm.org_name, vm.currentPage, vm.itemsPerPage
+    ).then(setBranches);
 
     return false;
   }
@@ -101,6 +126,10 @@ module.exports =
     vm.title = 'Files';
     vm.step  = 4;
     vm.files = bitbucketService.config.current.tree;
+    /* Set totalItems to 1 for now until it's determined that pagination is even required... in which case it must be handled differently because the
+     * underlying Bitbucket API is 1.0 not 2.0 (not available) for file listing.
+     */
+    vm.totalItems = 1;
 
     return vm.files;
   }
@@ -113,8 +142,11 @@ module.exports =
     return false;
   }
 
-  vm.onPageChange = function() {
-    vm.fetchRepos(null, vm.currentPage);
+  vm.onPageChange = function(step) {
+    switch(step) {
+      case 2: vm.fetchRepos(null); break;
+      case 3: vm.fetchBranches(null); break;
+    }
   }
 
 });

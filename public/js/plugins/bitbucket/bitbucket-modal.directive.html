@@ -19,7 +19,7 @@
 
   <!-- Branches -->
   <li ng-if="modal.step === 3" ng-repeat="branch in modal.branches">
-    <a ng-bind="branch.name" ng-click="modal.fetchTreeFiles(branch.commit.sha, branch.name)"></a>
+    <a ng-bind="branch.name" ng-click="modal.fetchTreeFiles(branch.target.hash, branch.name)"></a>
   </li>
 
   <!-- Files -->
@@ -29,9 +29,9 @@
 
 </ul>
 
-<div ng-if="modal.totalItems > modal.itemsPerPage && modal.step === 2">
+<div ng-if="modal.totalItems > modal.itemsPerPage">
   <pagination
-     ng-change      = "modal.onPageChange()"
+     ng-change      = "modal.onPageChange(modal.step)"
      ng-model       = "modal.currentPage"
      total-items    = "modal.totalItems"
      items-per-page = "modal.itemsPerPage"
