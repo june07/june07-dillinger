@@ -125,7 +125,8 @@ module.exports =
         if (di != null) {
           di.$scope.$close();
         }
-        //service.config.current.repo  = repo;
+        service.config.current.repo  = repo;
+        service.config.current.owner = owner;
         
         service.config.pagination = response.data.pagination;
         service.config.branches = response.data.items;
@@ -154,7 +155,8 @@ module.exports =
         if (di != null) {
           di.$scope.$close();
         }
-        //service.config.current.owner = owner;
+        service.config.current.owner = owner;
+
         service.config.pagination = response.data.pagination;
         service.config.repos = response.data.items;
 

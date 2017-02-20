@@ -41,15 +41,13 @@ module.exports =
     vm.step  = 2;
     vm.pagination = bitbucketService.config.pagination;
      
-    if (!vm.totalItems) {
-      //#pagination BUG - @graredcr - 25/09/2016
       if (String(vm.pagination) == "null")
       {
         vm.totalItems = 1 * vm.itemsPerPage;
       }else{
         vm.totalItems = vm.pagination.last.page * vm.itemsPerPage;
       }
-    }
+    
     vm.repos = bitbucketService.config.repos.sort(function(a, b) {
       if (a.name < b.name) {
         return -1;
@@ -89,14 +87,13 @@ module.exports =
     vm.branches = bitbucketService.config.branches;
     vm.pagination = bitbucketService.config.pagination;
      
-    if (!vm.totalItems) {
       if (String(vm.pagination) == "null")
       {
         vm.totalItems = 1 * vm.itemsPerPage;
       }else{
         vm.totalItems = vm.pagination.last.page * vm.itemsPerPage;
       }
-    }
+    
     vm.repos = bitbucketService.config.branches.sort(function(a, b) {
       if (a.name < b.name) {
         return -1;
@@ -125,7 +122,7 @@ module.exports =
   function setTreeFiles() {
     vm.title = 'Files';
     vm.step  = 4;
-    vm.files = bitbucketService.config.current.tree;
+    vm.files = bitbucketService.config.files;
     /* Set totalItems to 1 for now until it's determined that pagination is even required... in which case it must be handled differently because the
      * underlying Bitbucket API is 1.0 not 2.0 (not available) for file listing.
      */
